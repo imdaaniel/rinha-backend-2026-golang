@@ -1,0 +1,26 @@
+version: "3.9"
+services:
+  sidecar:
+    build: .
+    command: ["/bin/sidecar.exe"]
+    ports:
+      - "9998:9998"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: "140MB"
+  api:
+    build: .
+    command: ["/bin/api.exe"]
+    depends_on:
+      - sidecar
+    environment:
+      - SIDECAR_URL=http://sidecar:9998/search
+    ports:
+      - "9999:9999"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "180MB"
