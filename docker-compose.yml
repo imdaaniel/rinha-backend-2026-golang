@@ -1,26 +1,48 @@
-version: "3.9"
 services:
-  sidecar:
-    build: .
-    command: ["/bin/sidecar.exe"]
-    ports:
-      - "9998:9998"
-    deploy:
-      resources:
-        limits:
-          cpus: "0.3"
-          memory: "140MB"
-  api:
+  api1:
     build: .
     command: ["/bin/api.exe"]
-    depends_on:
-      - sidecar
     environment:
-      - SIDECAR_URL=http://sidecar:9998/search
-    ports:
-      - "9999:9999"
+      - REFERENCES_PATH=/app/data/references.bin
+    volumes:
+      - shared-data:/app/data:ro
+    expose:
+      - "9999"
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: "180MB"
+          cpus: "0.45"
+          memory: "159MB"
+
+  api2:
+    build: .
+    command: ["/bin/api.exe"]
+    environment:
+      - REFERENCES_PATH=/app/data/references.bin
+    volumes:
+      - shared-data:/app/data:ro
+    expose:
+      - "9999"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.45"
+          memory: "159MB"
+
+  lb:
+    image: haproxy:alpine
+    depends_on:
+      - api1
+      - api2
+    ports:
+      - "9999:9999"
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "0.10"
+          memory: "32MB"
+
+volumes:
+  shared-data:

@@ -88,6 +88,15 @@ func containsString(slice []string, v string) bool {
 // Vectorize converts a Payload into a 14-dim vector per rules
 func Vectorize(p *Payload) []float32 {
 	v := make([]float32, 14)
+	VectorizeTo(p, v)
+	return v
+}
+
+// VectorizeTo writes the 14-dim vector to a pre-allocated slice to avoid allocations
+func VectorizeTo(p *Payload, v []float32) {
+	if len(v) < 14 {
+		panic("vector slice must have at least 14 elements")
+	}
 
 	// dim 0: amount
 	v[0] = clamp01(p.Transaction.Amount / maxAmount)
@@ -172,8 +181,6 @@ func Vectorize(p *Payload) []float32 {
 
 	// dim 13: merchant_avg_amount
 	v[13] = clamp01(p.Merchant.AvgAmount / maxMerchantAvgAmount)
-
-	return v
 }
 
 // BruteForceKNNScore computes fraction of 'fraud' labels among k nearest
@@ -219,14 +226,28 @@ func distSq(a, b []float32) float32 {
 	if lb < n {
 		n = lb
 	}
-	var s float32 = 0
-	for i := 0; i < n; i++ {
+	
+	// Loop unrolling for better performance
+	var s float32
+	i := 0
+	// Process 4 elements at a time
+	for i+4 <= n {
+		dx0 := a[i] - b[i]
+		dx1 := a[i+1] - b[i+1]
+		dx2 := a[i+2] - b[i+2]
+		dx3 := a[i+3] - b[i+3]
+		s += dx0*dx0 + dx1*dx1 + dx2*dx2 + dx3*dx3
+		i += 4
+	}
+	// Process remaining elements
+	for i < n {
 		dx := a[i] - b[i]
 		s += dx * dx
+		i++
 	}
-	// if lengths differ, account remaining as differences
+	
 	if la != lb {
-		var rem float32 = 0
+		var rem float32
 		if la > lb {
 			for i := lb; i < la; i++ {
 				rem += a[i] * a[i]

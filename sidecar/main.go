@@ -3,34 +3,33 @@ package main
 import (
 	"encoding/json"
 	"log"
-	"math"
 	"net/http"
 	"os"
 	"time"
-)
 
-type Reference struct {
-	Vector []float32 `json:"vector"`
-	Label  string    `json:"label"`
-}
-
-var (
-	references []Reference
-	index      *vpNode
+	"rinha-backend-2026/golang/search"
 )
 
 func main() {
 	refPath := os.Getenv("REFERENCES_PATH")
 	if refPath == "" {
-		refPath = "data/references_example.json"
+		candidates := []string{"./resources/references.json.gz", "/app/resources/references.json.gz", "../base/resources/references.json.gz", "./resources/references.json", "/app/resources/references.json", "../base/resources/references.json"}
+		for _, candidate := range candidates {
+			if _, err := os.Stat(candidate); err == nil {
+				refPath = candidate
+				break
+			}
+		}
+		if refPath == "" {
+			refPath = "data/references_example.json"
+		}
 	}
 
-	if err := loadReferences(refPath); err != nil {
+	if err := search.LoadReferencesAndBuild(refPath); err != nil {
 		log.Fatalf("cannot load references: %v", err)
 	}
 
-	index = BuildVPTree(references)
-	log.Printf("loaded %d references and built VP-tree index", len(references))
+	log.Printf("loaded %d references and built VP-tree index", search.ReferenceCount())
 
 	port := os.Getenv("SIDECAR_PORT")
 	if port == "" {
@@ -82,77 +81,9 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 		req.K = 5
 	}
 
-	refLabels, refDists := SearchIndex(req.Vector, req.K)
+	refLabels, refDists := search.SearchIndex(req.Vector, req.K)
 	resp := searchResponse{Labels: refLabels, Distances: refDists}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
-}
-
-func BruteForceSearch(q []float32, refs []Reference, k int) ([]string, []float32) {
-	if len(refs) == 0 {
-		return nil, nil
-	}
-	type pair struct {
-		label string
-		dist  float32
-	}
-	ps := make([]pair, 0, len(refs))
-	for _, r := range refs {
-		d := distSq(q, r.Vector)
-		ps = append(ps, pair{label: r.Label, dist: d})
-	}
-
-	for i := 0; i < len(ps); i++ {
-		for j := i + 1; j < len(ps); j++ {
-			if ps[j].dist < ps[i].dist {
-				ps[i], ps[j] = ps[j], ps[i]
-			}
-		}
-	}
-
-	take := k
-	if take > len(ps) {
-		take = len(ps)
-	}
-
-	labels := make([]string, take)
-	dists := make([]float32, take)
-	for i := 0; i < take; i++ {
-		labels[i] = ps[i].label
-		dists[i] = ps[i].dist
-	}
-
-	return labels, dists
-}
-
-func distSq(a, b []float32) float32 {
-	la := len(a)
-	lb := len(b)
-	n := la
-	if lb < n {
-		n = lb
-	}
-	var s float32
-	for i := 0; i < n; i++ {
-		dx := a[i] - b[i]
-		s += dx * dx
-	}
-	if la != lb {
-		var rem float32
-		if la > lb {
-			for i := lb; i < la; i++ {
-				rem += a[i] * a[i]
-			}
-		} else {
-			for i := la; i < lb; i++ {
-				rem += b[i] * b[i]
-			}
-		}
-		s += rem
-	}
-	if math.IsNaN(float64(s)) || math.IsInf(float64(s), 0) {
-		return 1e9
-	}
-	return s
 }

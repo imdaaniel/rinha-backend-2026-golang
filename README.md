@@ -2,29 +2,27 @@
 
 Prototype do serviço em Go para a Rinha de Backend 2026.
 
-Como rodar localmente:
+A implementação atual usa um load balancer NGINX na porta `9999` e duas instâncias de API (`api1`, `api2`). Cada API carrega um índice local binário em vez de fazer chamadas HTTP a um sidecar de busca.
 
-```bash
-go build ./golang
-./golang
-```
-
-O servidor expõe `GET /ready` e `POST /fraud-score` na porta `:9999`.
-
-O protótipo atualmente usa um sidecar de busca vetorial disponível em `golang/sidecar`. O sidecar expõe `POST /search` na porta `:9998` e responde com os rótulos dos vizinhos mais próximos.
-
-Para rodar localmente, inicie o sidecar em um terminal e o serviço principal em outro:
+## Como rodar localmente
 
 ```bash
 cd golang
-go build ./sidecar
-./sidecar.exe
+docker compose up --build --force-recreate -d
 ```
 
-```bash
-cd golang
-go build .
-./golang.exe
-```
+### O que roda
 
-O serviço principal usa o sidecar por padrão e faz fallback para brute-force local se o sidecar estiver indisponível.
+- `lb` — NGINX distribuindo requisições round-robin para as APIs
+- `api1` e `api2` — instâncias de serviço Go atendendo `POST /fraud-score`
+
+O servidor expõe `GET /ready` e `POST /fraud-score` na porta `9999`.
+
+## Dados vetoriais
+
+O serviço carrega o dataset real em um formato binário compacto. Se necessário, ele gera `data/references.bin` a partir de `references.json.gz` no primeiro startup, evitando parse JSON em cada inicialização.
+
+## Notas
+
+- A porta `9999` é entregue pelo balanceador
+- O `docker-compose.yml` está configurado para manter a soma de recursos em `1 CPU` e `350 MB`

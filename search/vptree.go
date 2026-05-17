@@ -1,12 +1,8 @@
-package main
+package search
 
 import (
-	"compress/gzip"
-	"encoding/json"
-	"io"
-	"os"
+	"math"
 	"sort"
-	"strings"
 )
 
 const leafSize = 64
@@ -69,13 +65,9 @@ func (h *neighborSet) sortedAscending() []neighbor {
 	return h.items
 }
 
-func BuildVPTree(refs []Reference) *vpNode {
-	if len(refs) == 0 {
+func BuildVPTree(idxs []int) *vpNode {
+	if len(idxs) == 0 {
 		return nil
-	}
-	idxs := make([]int, len(refs))
-	for i := range refs {
-		idxs[i] = i
 	}
 	return buildVPTree(idxs)
 }
@@ -89,9 +81,9 @@ func buildVPTree(idxs []int) *vpNode {
 	others := idxs[:len(idxs)-1]
 
 	dists := make([]float32, len(others))
-	pivotVec := references[pivotIndex].Vector
+	pivotVec := objectVector(pivotIndex)
 	for i, idx := range others {
-		dists[i] = distSq(pivotVec, references[idx].Vector)
+		dists[i] = distSq(pivotVec, objectVector(idx))
 	}
 
 	threshold := findMedian(dists)
@@ -128,12 +120,12 @@ func (n *vpNode) search(q []float32, h *neighborSet) {
 	}
 	if n.indexes != nil {
 		for _, idx := range n.indexes {
-			h.add(idx, distSq(q, references[idx].Vector))
+			h.add(idx, distSq(q, objectVector(idx)))
 		}
 		return
 	}
 
-	pivotDist := distSq(q, references[n.pivot].Vector)
+	pivotDist := distSq(q, objectVector(n.pivot))
 	h.add(n.pivot, pivotDist)
 
 	var near, far *vpNode
@@ -163,53 +155,86 @@ func abs32(x float32) float32 {
 	return x
 }
 
-func SearchIndex(q []float32, k int) ([]string, []float32) {
-	if k <= 0 {
-		k = 5
-	}
-	if len(references) == 0 {
+func BruteForceSearch(q []float32, k int) ([]string, []float32) {
+	count := refCount()
+	if count == 0 {
 		return nil, nil
 	}
-	if k > len(references) {
-		k = len(references)
+	type pair struct {
+		label string
+		dist  float32
 	}
-	if index == nil {
-		return BruteForceSearch(q, references, k)
-	}
-
-	h := newNeighborSet(k)
-	index.search(q, h)
-	if len(h.items) == 0 {
-		return BruteForceSearch(q, references, k)
+	ps := make([]pair, 0, count)
+	for i := 0; i < count; i++ {
+		d := distSq(q, objectVector(i))
+		ps = append(ps, pair{label: objectLabel(i), dist: d})
 	}
 
-	neighbors := h.sortedAscending()
-	labels := make([]string, len(neighbors))
-	dists := make([]float32, len(neighbors))
-	for i, n := range neighbors {
-		labels[i] = references[n.idx].Label
-		dists[i] = n.dist
+	for i := 0; i < len(ps); i++ {
+		for j := i + 1; j < len(ps); j++ {
+			if ps[j].dist < ps[i].dist {
+				ps[i], ps[j] = ps[j], ps[i]
+			}
+		}
 	}
+
+	take := k
+	if take > len(ps) {
+		take = len(ps)
+	}
+
+	labels := make([]string, take)
+	dists := make([]float32, take)
+	for i := 0; i < take; i++ {
+		labels[i] = ps[i].label
+		dists[i] = ps[i].dist
+	}
+
 	return labels, dists
 }
 
-func loadReferences(path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
+func distSq(a, b []float32) float32 {
+	la := len(a)
+	lb := len(b)
+	n := la
+	if lb < n {
+		n = lb
 	}
-	defer f.Close()
-
-	reader := io.Reader(f)
-	if strings.HasSuffix(path, ".gz") {
-		gz, err := gzip.NewReader(f)
-		if err != nil {
-			return err
+	
+	// Loop unrolling for better performance
+	var s float32
+	i := 0
+	// Process 4 elements at a time
+	for i+4 <= n {
+		dx0 := a[i] - b[i]
+		dx1 := a[i+1] - b[i+1]
+		dx2 := a[i+2] - b[i+2]
+		dx3 := a[i+3] - b[i+3]
+		s += dx0*dx0 + dx1*dx1 + dx2*dx2 + dx3*dx3
+		i += 4
+	}
+	// Process remaining elements
+	for i < n {
+		dx := a[i] - b[i]
+		s += dx * dx
+		i++
+	}
+	
+	if la != lb {
+		var rem float32
+		if la > lb {
+			for i := lb; i < la; i++ {
+				rem += a[i] * a[i]
+			}
+		} else {
+			for i := la; i < lb; i++ {
+				rem += b[i] * b[i]
+			}
 		}
-		defer gz.Close()
-		reader = gz
+		s += rem
 	}
-
-	dec := json.NewDecoder(reader)
-	return dec.Decode(&references)
+	if math.IsNaN(float64(s)) || math.IsInf(float64(s), 0) {
+		return 1e9
+	}
+	return s
 }
