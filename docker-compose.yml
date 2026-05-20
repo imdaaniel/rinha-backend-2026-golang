@@ -3,9 +3,11 @@ services:
     build: .
     command: ["/bin/api.exe"]
     environment:
-      - REFERENCES_PATH=/app/data/references.bin
+      - REFERENCES_PATH=/app/data/references_small.json
+      - TIMING_ENABLED=true
+      - TIMING_FILE=/tmp/timings.log
     volumes:
-      - shared-data:/app/data:ro
+      - ./data:/app/data:ro
     expose:
       - "9999"
     deploy:
@@ -18,9 +20,11 @@ services:
     build: .
     command: ["/bin/api.exe"]
     environment:
-      - REFERENCES_PATH=/app/data/references.bin
+      - REFERENCES_PATH=/app/data/references_small.json
+      - TIMING_ENABLED=true
+      - TIMING_FILE=/tmp/timings.log
     volumes:
-      - shared-data:/app/data:ro
+      - ./data:/app/data:ro
     expose:
       - "9999"
     deploy:
@@ -43,6 +47,3 @@ services:
         limits:
           cpus: "0.10"
           memory: "32MB"
-
-volumes:
-  shared-data:

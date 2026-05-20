@@ -1,6 +1,6 @@
 module rinha-backend-2026/golang
 
-go 1.25.0
+go 1.25
 
 require github.com/coder/hnsw v0.6.1
 

@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/fogfish/hnsw"
@@ -30,6 +32,10 @@ type Reference struct {
 }
 
 var (
+	enableTiming = false
+	timingFile   = "/tmp/timings.log"
+	timingMutex  sync.Mutex
+
 	references []Reference
 	vpIndex    *vpNode
 	hnswIndex  *HNSW
@@ -281,20 +287,27 @@ func BuildIndex() error {
 	}
 
 	// Use fogfish/hnsw library for proven HNSW implementation
-	// Moderate parameters for balance between speed and precision
+	// Very aggressive parameters for maximum speed at cost of accuracy
+ hnswStart := time.Now()
 	fogfishIndex = hnsw.New(
 		vector.SurfaceVF32(surface.Euclidean()),
-		hnsw.WithEfConstruction(100), // Moderate for index quality
-		hnsw.WithM(16),               // Moderate for precision
-		hnsw.WithM0(32),              // Moderate for precision
+		hnsw.WithEfConstruction(50), // Very reduced for faster construction
+		hnsw.WithM(4),               // Very reduced for faster queries
+		hnsw.WithM0(8),              // Very reduced for faster queries
 	)
+	logTiming("hnsw_creation", time.Since(hnswStart))
 	
 	// Add all vectors to HNSW
-	// Use 14 dimensions directly without padding for better precision
+	// Pad vectors to 16 dimensions (multiple of 4) for SIMD compatibility
+	insertStart := time.Now()
 	for i := 0; i < refCount(); i++ {
 		vec := vectorAt(i)
-		fogfishIndex.Insert(vector.VF32{Key: uint32(i), Vec: vec})
+		paddedVec := make([]float32, 16)
+		copy(paddedVec, vec)
+		// Last 2 dimensions remain 0 (padding)
+		fogfishIndex.Insert(vector.VF32{Key: uint32(i), Vec: paddedVec})
 	}
+	logTiming("hnsw_insert_all", time.Since(insertStart))
 
 	return nil
 }
@@ -354,9 +367,14 @@ func SearchScore(q []float32, k int) (float32, error) {
 	}
 
 	// Use fogfish/hnsw library for search
-	// Use 14 dimensions directly without padding for better precision
-	query := vector.VF32{Vec: q}
-	neighbors := fogfishIndex.Search(query, k, 20) // Increased for better precision
+	// Pad query vector to 16 dimensions for SIMD compatibility
+	paddedQuery := make([]float32, 16)
+	copy(paddedQuery, q)
+	query := vector.VF32{Vec: paddedQuery}
+	
+	searchStart := time.Now()
+	neighbors := fogfishIndex.Search(query, k, 5) // Very reduced for maximum speed
+	logTiming("hnsw_search", time.Since(searchStart))
 	
 	if len(neighbors) == 0 {
 		return 0, fmt.Errorf("no neighbors returned")
@@ -462,4 +480,27 @@ func bytesAsFloat32s(b []byte) []float32 {
 
 func alignUp(value, alignment int) int {
 	return ((value + alignment - 1) / alignment) * alignment
+}
+
+func InitTiming(enabled bool, file string) {
+	enableTiming = enabled
+	if file != "" {
+		timingFile = file
+	}
+}
+
+func logTiming(operation string, duration time.Duration) {
+	if !enableTiming {
+		return
+	}
+	timingMutex.Lock()
+	defer timingMutex.Unlock()
+	timestamp := time.Now().Format(time.RFC3339Nano)
+	line := fmt.Sprintf("%s %s %d\n", timestamp, operation, duration.Microseconds())
+	f, err := os.OpenFile(timingFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.WriteString(line)
 }
